@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Premium Chess AI - Castling Edition</title>
+    <style>
+        :root {
+            --ivory: #FFFFF0;
+            --wenge: #2B231D;
+            --emerald-edge: #004d00;
+            --selected: rgba(76, 175, 80, 0.6);
+            --legal-move: rgba(255, 235, 59, 0.4);
+            --check-color: rgba(128, 0, 32, 0.8);
+            --mate-color: rgba(0, 0, 0, 0.9);
+            --history-hover: rgba(3, 169, 244, 0.45);
+            --history-hover-capture: rgba(244, 67, 54, 0.45);
+            --texture: repeating-linear-gradient(45deg, rgba(0,0,0,0.03), rgba(0,0,0,0.03) 1px, transparent 1px, transparent 4px);
+        }
+
+        body {
+            margin: 0; padding: 0; background-color: #121212;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            min-height: 100vh; font-family: 'Segoe UI', sans-serif; overflow: hidden; perspective: 2000px;
+        }
+
+        .app-container {
+            position: relative; width: 90vmin; height: 90vmin;
+            max-width: 600px; max-height: 600px;
+            transform-style: preserve-3d;
+        }
+
+        .diamond-toggle {
+            position: absolute; top: -70px; left: 50%; transform: translateX(-50%);
+            width: 50px; height: 50px; cursor: pointer; z-index: 5000;
+            filter: drop-shadow(0 0 10px rgba(255,255,255,0.4));
+        }
+
+        .history-sidebar {
+            position: absolute; left: -105px; top: 0; bottom: 0; width: 90px;
+            display: flex; flex-direction: column; gap: 6px;
+            overflow: hidden; visibility: hidden; opacity: 0; transition: 0.3s ease;
+            mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+            z-index: 10;
+        }
+        .history-sidebar.visible { visibility: visible; opacity: 1; }
+        
+        .history-item {
+            padding: 8px 10px; border-radius: 4px; font-size: 0.95rem; font-weight: bold;
+            text-align: center; border-left: 4px solid #2e7d32;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+            animation: slideDown 0.3s ease-out; cursor: pointer; transition: transform 0.2s;
+        }
+        .history-item:hover { transform: scale(1.05); }
+
+        .history-item.white-move { background: rgba(255, 255, 240, 0.9); color: var(--wenge); }
+        .history-item.black-move { background: rgba(43, 35, 29, 0.9); color: var(--ivory); }
+
+        @keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        .history-controls {
+            position: absolute; bottom: -80px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 60px; z-index: 1000;
+        }
+        .arrow { width: 45px; height: 45px; cursor: pointer; transition: 0.3s; fill: white; opacity: 0.2; pointer-events: none; }
+        .arrow.active { opacity: 1; pointer-events: auto; }
+
+        .game-card {
+            width: 100%; height: 100%; position: relative;
+            transform-style: preserve-3d; transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .menu-open .game-card { transform: rotateY(180deg); }
+
+        .face {
+            position: absolute; inset: 0; backface-visibility: hidden;
+            border: 10px solid #3d342d; box-shadow: 0 20px 50px rgba(0,0,0,0.9);
+        }
+
+        .board-face { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); transform: rotateY(0deg); z-index: 2; }
+        .menu-face { background-color: #1a1a1a; transform: rotateY(180deg); display: flex; flex-direction: column; padding: 25px; box-sizing: border-box; justify-content: center; color: var(--ivory); z-index: 1; }
+
+        .menu-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #333; cursor: pointer; }
+        .toggle-box { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: 0.2s;}
+        .toggle-i { background: #2e7d32; border-radius: 50%; }
+        .toggle-o { background: #c62828; border-radius: 4px; }
+
+        .ai-overlay { 
+            position: absolute; inset: 0; background: rgba(0,0,0,0.4); 
+            display: none; justify-content: center; align-items: center; 
+            z-index: 100; transform: translateZ(5px); pointer-events: none;
+        }
+        .thinking .ai-overlay { display: flex; }
+        .hourglass { width: 80px; height: 80px; fill: white; animation: flip 2s infinite ease-in-out; }
+        @keyframes flip { 0% { transform: rotate(0); } 80%, 100% { transform: rotate(180deg); } }
+
+        .square { position: relative; display: flex; justify-content: center; align-items: center; }
+        .square.light { background-color: var(--ivory); background-image: var(--texture); --king-cross-color: #1a1a1a; }
+        .square.dark { background-color: var(--wenge); background-image: var(--texture); --king-cross-color: var(--ivory); }
+        
+        .square.selected::after { content: ''; position: absolute; inset: 0; background-color: var(--selected); z-index: 5; }
+        .square.legal::after { content: ''; position: absolute; inset: 0; background-color: var(--legal-move); border: 1.5px solid rgba(255,235,59,0.5); z-index: 5; }
+        
+        .square.check { background-color: var(--check-color) !important; }
+        .square.mate { background-color: var(--mate-color) !important; }
+
+        .flag-icon { position: absolute; bottom: 0; right: 0; width: 40%; height: 40%; z-index: 15; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.8)); pointer-events: none; }
+        .crown-icon { position: absolute; top: -15%; left: 50%; transform: translateX(-50%); width: 45%; height: 45%; z-index: 15; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.8)); pointer-events: none; }
+
+        .square.history-hover::after { content: ''; position: absolute; inset: 0; background-color: var(--history-hover); border: 2px solid rgba(3, 169, 244, 0.7); z-index: 4; transition: background-color 0.2s; }
+        .square.history-hover-capture::after { content: ''; position: absolute; inset: 0; background-color: var(--history-hover-capture); border: 2px solid rgba(244, 67, 54, 0.7); z-index: 4; transition: background-color 0.2s; }
+
+        .coord { position: absolute; font-size: 0.75rem; font-weight: 700; pointer-events: none; z-index: 6; opacity: 0.7; }
+        .coord-letter { bottom: 2px; right: 4px; }
+        .coord-number { top: 2px; left: 4px; }
+        .square.light .coord { color: var(--wenge); }
+        .square.dark .coord { color: var(--ivory); }
+
+        .piece-wrapper { position: absolute; width: 85%; height: 85%; z-index: 10; pointer-events: none; }
+        svg { width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+
+        @media (max-width: 820px) {
+            .history-sidebar { left: 5px; background: rgba(0,0,0,0.2); padding: 5px; border-radius: 5px; z-index: 100; pointer-events: none; }
+            .history-item { pointer-events: auto; }
+            .history-item.white-move { background: rgba(255, 255, 240, 0.95); }
+            .history-item.black-move { background: rgba(43, 35, 29, 0.95); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container" id="main-ui">
+        <div class="history-sidebar" id="history-sidebar"></div>
+
+        <div class="diamond-toggle" onclick="toggleMenu()">
+            <svg viewBox="0 0 100 100"><path d="M50 5 L90 50 L50 95 L10 50 Z" fill="white" stroke="#3d342d" stroke-width="2"/><path d="M50 5 L50 95 M10 50 L90 50" stroke="rgba(0,0,0,0.2)" stroke-width="1"/></svg>
+        </div>
+
+        <div class="game-card">
+            <div id="board" class="face board-face"></div>
+            <div class="ai-overlay" id="hourglass-layer">
+                <svg class="hourglass" viewBox="0 0 24 24"><path d="M6 2v6h.01L6 8.01 10 12l-4 4 .01.01H6V22h12v-5.99h-.01L18 16l-4-4 4-3.99-.01-.01H18V2H6zm10 14.5V20H8v-3.5l4-4 4 4zM12 11.5l-4-4V4h8v3.5l-4 4z"/></svg>
+            </div>
+            <div class="face menu-face" id="menu-content"></div>
+        </div>
+
+        <div class="history-controls">
+            <svg class="arrow" id="undo-btn" viewBox="0 0 24 24" onclick="handleUndo()"><path d="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+            <svg class="arrow" id="redo-btn" viewBox="0 0 24 24" onclick="handleRedo()"><path d="M11.5 8c2.65 0 5.05 1 6.9 2.6L22 7v9h-9l3.62-3.62c-1.39-1.16-3.16-1.88-5.12-1.88-3.54 0-6.55 2.31-7.6 5.5l-2.37-.78C2.92 11.03 6.85 8 11.5 8z"/></svg>
+        </div>
+    </div>
+
+    <svg style="display: none;">
+        <defs>
+            <pattern id="hatch" patternUnits="userSpaceOnUse" width="4" height="4"><path d="M-1,1 l2,-2 M0,4 l4,-4 M3,5 l2,-2" stroke="rgba(0,0,0,0.1)" stroke-width="0.5" /></pattern>
+            <symbol id="p" viewBox="0 0 100 100"><path d="M50 20 C40 20 35 25 35 35 C35 45 42 48 45 50 C35 55 30 65 30 80 L70 80 C70 65 65 55 55 50 C58 48 65 45 65 35 C65 25 60 20 50 20 Z" /></symbol>
+            <symbol id="r" viewBox="0 0 100 100"><path d="M30 80 L70 80 L70 70 L65 70 L65 35 L72 20 L28 20 L35 35 L35 70 L30 70 Z M30 20 L30 30 M43 20 L43 30 M57 20 L57 30 M70 20 L70 30" /></symbol>
+            <symbol id="n" viewBox="0 0 100 100"><path d="M30 80 C30 80 25 50 40 30 C45 20 65 15 75 15 L70 35 C70 35 85 40 80 55 C75 65 65 65 65 65 L55 60 C55 60 55 80 30 80 Z" /></symbol>
+            <symbol id="b" viewBox="0 0 100 100"><path d="M50 15 C40 15 35 25 35 40 C35 55 45 60 45 60 L40 80 L60 80 L55 60 C55 60 65 55 65 40 C65 25 60 15 50 15 Z" /><circle cx="50" cy="12" r="3" /></symbol>
+            <symbol id="q" viewBox="0 0 100 100"><path d="M30 80 L70 80 L65 40 L80 25 L50 10 L20 25 L35 40 Z" /><circle cx="50" cy="10" r="4" /></symbol>
+            <symbol id="k" viewBox="0 0 100 100"><path d="M30 80 L70 80 L65 40 C65 40 80 35 80 25 C80 15 20 15 20 25 C20 35 35 40 35 40 L35 80 Z" /><path d="M50 5 L50 18 M42 11 L58 11" stroke="var(--king-cross-color)" stroke-width="4" stroke-linecap="round" fill="none" /></symbol>
+            
+            <symbol id="flag" viewBox="0 0 24 24"><path fill="#ffffff" d="M14.45 4L14 2H4v17h2v-7h5.55L12 14h8V4h-5.55z" stroke="#1a1a1a" stroke-width="1" stroke-linejoin="round"/></symbol>
+            <symbol id="crown" viewBox="0 0 24 24"><path fill="#FFD700" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z" stroke="#B8860B" stroke-width="1" stroke-linejoin="round"/></symbol>
+        </defs>
+    </svg>
+
+    <script>
+        const STOCKFISH_URL = 'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js';
+        const blob = new Blob([`importScripts("${STOCKFISH_URL}");`], { type: 'application/javascript' });
+        const stockfish = new Worker(URL.createObjectURL(blob));
+
+        const mainUI = document.getElementById('main-ui');
+        const boardEl = document.getElementById('board');
+        const menuEl = document.getElementById('menu-content');
+        const historySidebar = document.getElementById('history-sidebar');
+        
+        let options = { vsAI: true, undoEnabled: true, playAsBlack: false, showCoords: true, showHistory: true };
+        let boardState =[];
+        let history =[]; 
+        let historyIndex = -1;
+        let turn = 'white', selectedSquare = null;
+        
+        let kingInCheck = null; 
+        let isCheckmate = false;
+
+        // Stanje rokade: da li se kralj ili top pomjerio
+        let castlingRights = { white: { k: true, q: true }, black: { k: true, q: true } };
+
+        function toggleMenu() { mainUI.classList.toggle('menu-open'); }
+
+        function updateMenuUI() {
+            const items =[
+                { id: 'vsAI', label: 'Play against computer' },
+                { id: 'undoEnabled', label: 'Return moves enabled' },
+                { id: 'showCoords', label: 'Show coordinates' },
+                { id: 'showHistory', label: 'Show history' },
+                { id: 'playAsBlack', label: 'Play as Black' },
+                { id: 'newGame', label: 'New game', special: true }
+            ];
+            menuEl.innerHTML = items.map(item => `
+                <div class="menu-item" onclick="handleMenuClick('${item.id}')">
+                    <span>${item.label}</span>
+                    <div class="toggle-box ${item.special ? 'toggle-o' : (options[item.id] ? 'toggle-i' : 'toggle-o')}">
+                        ${item.special ? 'O' : (options[item.id] ? 'I' : 'O')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function handleMenuClick(id) {
+            if(id === 'newGame') { resetGame(); toggleMenu(); return; }
+            options[id] = !options[id];
+            updateMenuUI();
+            
+            if(id === 'playAsBlack' || id === 'vsAI') resetGame();
+            else { renderBoard(); renderHistory(); }
+        }
+
+        function updateGameState() {
+            kingInCheck = isCheck(turn, boardState);
+            let hasMoves = false;
+            for(let r=0; r<8; r++) {
+                for(let c=0; c<8; c++) {
+                    if(boardState[r][c]?.color === turn && getLegalMoves(r, c).length > 0) { 
+                        hasMoves = true; break; 
+                    }
+                }
+                if(hasMoves) break;
+            }
+            isCheckmate = kingInCheck && !hasMoves;
+        }
+
+        function resetGame() {
+            const major =['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
+            boardState = Array(8).fill(null).map(() => Array(8).fill(null));
+            for(let i=0; i<8; i++) {
+                boardState[0][i] = { type: major[i], color: 'black' };
+                boardState[1][i] = { type: 'p', color: 'black' };
+                boardState[6][i] = { type: 'p', color: 'white' };
+                boardState[7][i] = { type: major[i], color: 'white' };
+            }
+            turn = 'white';
+            castlingRights = { white: { k: true, q: true }, black: { k: true, q: true } };
+            
+            history =[{ 
+                state: JSON.stringify(boardState), 
+                san: '',
+                castling: JSON.stringify(castlingRights) 
+            }];
+            historyIndex = 0; 
+            selectedSquare = null;
+            isCheckmate = false;
+            updateGameState();
+            
+            renderBoard(); renderHistory();
+            if(options.vsAI && options.playAsBlack && !isCheckmate) setTimeout(askAI, 800);
+        }
+
+        function executeMove(fr, fc, tr, tc) {
+            const piece = boardState[fr][fc];
+            const target = boardState[tr][tc];
+            const isCapture = !!target;
+            let san = '';
+
+            let pieceStr = piece.type === 'p' ? '' : piece.type.toUpperCase();
+            let capStr = isCapture ? (piece.type === 'p' ? String.fromCharCode(97 + fc) + 'x' : 'x') : '';
+            let destStr = String.fromCharCode(97 + tc) + (8 - tr);
+
+            // Rješavanje logike Rokade (pomjeranje topa i notacija)
+            if (piece.type === 'k' && Math.abs(tc - fc) === 2) {
+                if (tc === 6) { // Mala rokada (Kingside)
+                    boardState[tr][5] = boardState[tr][7];
+                    boardState[tr][7] = null;
+                    san = 'O-O';
+                } else if (tc === 2) { // Velika rokada (Queenside)
+                    boardState[tr][3] = boardState[tr][0];
+                    boardState[tr][0] = null;
+                    san = 'O-O-O';
+                }
+            } else {
+                san = pieceStr + capStr + destStr;
+            }
+
+            // Unapređenje pijuna (auto-queen)
+            if (piece.type === 'p' && (tr === 0 || tr === 7)) {
+                piece.type = 'q';
+            }
+
+            // Ažuriranje prava na rokadu
+            if (piece.type === 'k') {
+                castlingRights[piece.color].k = false;
+                castlingRights[piece.color].q = false;
+            } else if (piece.type === 'r') {
+                if (fr === 7 && fc === 0) castlingRights.white.q = false;
+                if (fr === 7 && fc === 7) castlingRights.white.k = false;
+                if (fr === 0 && fc === 0) castlingRights.black.q = false;
+                if (fr === 0 && fc === 7) castlingRights.black.k = false;
+            }
+            // Ako je pojeden nečiji top u uglu
+            if (target && target.type === 'r') {
+                if (tr === 7 && tc === 0) castlingRights.white.q = false;
+                if (tr === 7 && tc === 7) castlingRights.white.k = false;
+                if (tr === 0 && tc === 0) castlingRights.black.q = false;
+                if (tr === 0 && tc === 7) castlingRights.black.k = false;
+            }
+
+            // Primjena poteza
+            boardState[tr][tc] = piece;
+            boardState[fr][fc] = null;
+            turn = (turn === 'white') ? 'black' : 'white';
+            selectedSquare = null;
+
+            updateGameState();
+
+            if(kingInCheck) {
+                san += isCheckmate ? '#' : '+';
+            }
+
+            history = history.slice(0, historyIndex + 1);
+            history.push({ 
+                state: JSON.stringify(boardState), 
+                san: san, 
+                fr: fr, fc: fc, 
+                tr: tr, tc: tc,
+                isCapture: isCapture,
+                castling: JSON.stringify(castlingRights)
+            });
+            historyIndex++;
+
+            renderBoard();
+            renderHistory();
+        }
+
+        // --- HOVER LOGIKA ZA ISTORIJU ---
+        function setHoveredMove(index) {
+            clearHoveredMove();
+            const move = history[index];
+            if(move && move.fr !== undefined) {
+                const frSq = document.querySelector(`.square[data-r="${move.fr}"][data-c="${move.fc}"]`);
+                const trSq = document.querySelector(`.square[data-r="${move.tr}"][data-c="${move.tc}"]`);
+                if(frSq) frSq.classList.add('history-hover');
+                if(trSq) trSq.classList.add(move.isCapture ? 'history-hover-capture' : 'history-hover');
+            }
+        }
+
+        function clearHoveredMove() {
+            document.querySelectorAll('.history-hover, .history-hover-capture').forEach(el => {
+                el.classList.remove('history-hover', 'history-hover-capture');
+            });
+        }
+
+        function renderHistory() {
+            if(!options.showHistory) {
+                historySidebar.classList.remove('visible');
+                return;
+            }
+            historySidebar.classList.add('visible');
+            let html = '';
+            
+            for(let i = historyIndex; i > 0; i--) {
+                const moveColorClass = (i % 2 === 1) ? 'white-move' : 'black-move';
+                html += `<div class="history-item ${moveColorClass}" 
+                              onmouseenter="setHoveredMove(${i})" 
+                              onmouseleave="clearHoveredMove()">
+                              ${history[i].san}
+                         </div>`;
+            }
+            historySidebar.innerHTML = html;
+        }
+
+        function handleUndo() {
+            if(historyIndex <= 0 || !options.undoEnabled) return;
+            historyIndex--;
+            boardState = JSON.parse(history[historyIndex].state);
+            castlingRights = JSON.parse(history[historyIndex].castling);
+            turn = (historyIndex % 2 === 0) ? 'white' : 'black';
+            updateGameState();
+            renderBoard(); renderHistory();
+        }
+
+        function handleRedo() {
+            if(historyIndex >= history.length - 1 || !options.undoEnabled) return;
+            historyIndex++;
+            boardState = JSON.parse(history[historyIndex].state);
+            castlingRights = JSON.parse(history[historyIndex].castling);
+            turn = (historyIndex % 2 === 0) ? 'white' : 'black';
+            updateGameState();
+            renderBoard(); renderHistory();
+        }
+
+        function getRawMoves(r, c, state) {
+            const piece = state[r][c]; if(!piece) return [];
+            const moves =[], enemy = piece.color === 'white' ? 'black' : 'white';
+            const add = (nr, nc) => {
+                if(nr>=0 && nr<8 && nc>=0 && nc<8) {
+                    if(!state[nr][nc]) { moves.push([nr, nc]); return 'empty'; }
+                    if(state[nr][nc].color === enemy) { moves.push([nr, nc]); return 'capture'; }
+                } return 'blocked';
+            };
+            if(piece.type === 'p') {
+                const d = piece.color === 'white' ? -1 : 1;
+                if(state[r+d]?.[c] === null) { moves.push([r+d, c]); if((piece.color==='white'&&r===6||piece.color==='black'&&r===1)&&!state[r+2*d][c]) moves.push([r+2*d, c]); }[1, -1].forEach(dc => { if(state[r+d]?.[c+dc]?.color === enemy) moves.push([r+d, c+dc]); });
+            } else if(piece.type === 'n') [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]].forEach(m => add(r+m[0], c+m[1]));
+            else if(piece.type === 'r' || piece.type === 'q') [[1,0],[-1,0],[0,1],[0,-1]].forEach(d => { for(let i=1;i<8;i++) if(add(r+d[0]*i, c+d[1]*i)!=='empty') break; });
+            if(piece.type === 'b' || piece.type === 'q') [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(d => { for(let i=1;i<8;i++) if(add(r+d[0]*i, c+d[1]*i)!=='empty') break; });
+            else if(piece.type === 'k') {
+                for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++) if(dr!==0||dc!==0) add(r+dr, c+dc);
+                
+                // Prava za rokadu (dodavanje u raw poteze)
+                const row = piece.color === 'white' ? 7 : 0;
+                if (r === row && c === 4) {
+                    const rights = castlingRights[piece.color];
+                    // Kingside
+                    if (rights.k && !state[row][5] && !state[row][6]) moves.push([row, 6, 'castle-k']);
+                    // Queenside
+                    if (rights.q && !state[row][1] && !state[row][2] && !state[row][3]) moves.push([row, 2, 'castle-q']);
+                }
+            }
+            return moves;
+        }
+
+        function isCheck(color, state) {
+            let kr, kc;
+            for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(state[r][c]?.type==='k' && state[r][c]?.color===color) { kr=r; kc=c; break; }
+            for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(state[r][c] && state[r][c].color !== color) {
+                if(getRawMoves(r, c, state).some(m => m[0]===kr && m[1]===kc)) return {r: kr, c: kc};
+            } return null;
+        }
+
+        function getLegalMoves(r, c) {
+            return getRawMoves(r, c, boardState).filter(m => {
+                const original = boardState[r][c];
+
+                // Dodatne restrikcije za rokadu (Ne može rokirati IZ šaha niti KROZ šah)
+                if (m[2] === 'castle-k' || m[2] === 'castle-q') {
+                    if (isCheck(original.color, boardState)) return false; // Iz šaha
+                    
+                    const stepC = m[2] === 'castle-k' ? 5 : 3;
+                    boardState[r][stepC] = original; boardState[r][c] = null;
+                    const checkPass = isCheck(original.color, boardState);
+                    boardState[r][c] = original; boardState[r][stepC] = null;
+                    if (checkPass) return false; // Kroz šah
+                }
+
+                const target = boardState[m[0]][m[1]];
+                boardState[m[0]][m[1]] = original; boardState[r][c] = null;
+                const check = isCheck(original.color, boardState);
+                boardState[r][c] = original; boardState[m[0]][m[1]] = target;
+                return !check;
+            });
+        }
+
+        function askAI() {
+            mainUI.classList.add('thinking');
+            let fen = "";
+            for(let r=0; r<8; r++) {
+                let empty = 0;
+                for(let c=0; c<8; c++) {
+                    const p = boardState[r][c];
+                    if(!p) empty++;
+                    else { if(empty>0) fen+=empty; empty=0; fen += p.color==='white'?p.type.toUpperCase():p.type; }
+                }
+                if(empty>0) fen+=empty; if(r<7) fen+="/";
+            }
+            
+            // FEN string mora sadržati prava na rokadu kako bi kompjuter to shvatio
+            let cRights = '';
+            if(castlingRights.white.k) cRights += 'K';
+            if(castlingRights.white.q) cRights += 'Q';
+            if(castlingRights.black.k) cRights += 'k';
+            if(castlingRights.black.q) cRights += 'q';
+            if(cRights === '') cRights = '-';
+
+            stockfish.postMessage(`position fen ${fen} ${turn[0]} ${cRights} - 0 1`);
+            stockfish.postMessage("go movetime 1500");
+        }
+
+        stockfish.onmessage = (e) => {
+            if(e.data.startsWith('bestmove')) {
+                const m = e.data.split(' ')[1]; if(m === '(none)') return;
+                const fr = 8-m[1], fc = m.charCodeAt(0)-97, tr = 8-m[3], tc = m.charCodeAt(2)-97;
+                mainUI.classList.remove('thinking');
+                executeMove(fr, fc, tr, tc);
+            }
+        };
+
+        function renderBoard() {
+            boardEl.innerHTML = '';
+            const isFlipped = options.playAsBlack && options.vsAI; 
+            const legalMoves = selectedSquare && !isCheckmate ? getLegalMoves(selectedSquare.r, selectedSquare.c) :[];
+
+            for(let i=0; i<64; i++) {
+                const r = isFlipped ? 7 - Math.floor(i/8) : Math.floor(i/8);
+                const c = isFlipped ? 7 - (i%8) : i%8;
+
+                const sq = document.createElement('div');
+                sq.className = `square ${(r+c)%2===0?'light':'dark'}`;
+                sq.dataset.r = r; sq.dataset.c = c;
+
+                if(selectedSquare?.r===r && selectedSquare?.c===c) sq.classList.add('selected');
+                if(legalMoves.some(m => m[0]===r && m[1]===c)) sq.classList.add('legal');
+                
+                let innerContent = '';
+
+                const p = boardState[r][c];
+                
+                if (kingInCheck?.r === r && kingInCheck?.c === c) {
+                    if (isCheckmate) {
+                        sq.classList.add('mate');
+                        innerContent += `<div class="flag-icon"><svg><use href="#flag"/></svg></div>`;
+                    } else {
+                        sq.classList.add('check');
+                    }
+                }
+                
+                if (isCheckmate && p && p.type === 'k' && p.color !== turn) {
+                    innerContent += `<div class="crown-icon"><svg><use href="#crown"/></svg></div>`;
+                }
+
+                if(options.showCoords) {
+                    const visualRow = Math.floor(i / 8);
+                    const visualCol = i % 8;
+                    if(visualRow === 7) innerContent += `<div class="coord coord-letter">${String.fromCharCode(97 + c)}</div>`;
+                    if(visualCol === 0) innerContent += `<div class="coord coord-number">${8 - r}</div>`;
+                }
+
+                if(p) {
+                    const fill = p.color==='white'?'var(--ivory)':'var(--wenge)';
+                    const stroke = p.color==='white'?'#1a1a1a':'var(--emerald-edge)';
+                    innerContent += `<div class="piece-wrapper"><svg viewBox="0 0 100 100"><g fill="${fill}" stroke="${stroke}" stroke-width="${p.color==='white'?2.5:4}"><use href="#${p.type}" /></g><g fill="url(#hatch)" stroke="none"><use href="#${p.type}" /></g><ellipse cx="40" cy="30" rx="8" ry="4" fill="white" fill-opacity="0.2" transform="rotate(-30 40 30)" /></svg></div>`;
+                }
+
+                sq.innerHTML = innerContent;
+
+                sq.onclick = () => {
+                    if(mainUI.classList.contains('thinking') || mainUI.classList.contains('menu-open') || isCheckmate) return;
+                    
+                    if(selectedSquare && legalMoves.some(m => m[0]===r && m[1]===c)) {
+                        executeMove(selectedSquare.r, selectedSquare.c, r, c);
+                        if(options.vsAI && !isCheckmate) setTimeout(askAI, 600);
+                    } else if(p && p.color === turn) {
+                        selectedSquare = {r, c}; renderBoard();
+                    } else { selectedSquare = null; renderBoard(); }
+                };
+                boardEl.appendChild(sq);
+            }
+            
+            const uiUndo = document.getElementById('undo-btn');
+            const uiRedo = document.getElementById('redo-btn');
+            if(options.undoEnabled) {
+                uiUndo.style.display = 'block'; uiRedo.style.display = 'block';
+                uiUndo.classList.toggle('active', historyIndex > 0);
+                uiRedo.classList.toggle('active', historyIndex < history.length - 1);
+            } else {
+                uiUndo.style.display = 'none'; uiRedo.style.display = 'none';
+            }
+        }
+
+        stockfish.postMessage("uci");
+        updateMenuUI();
+        resetGame();
+    </script>
+</body>
+</html>
